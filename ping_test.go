@@ -50,7 +50,7 @@ func TestPingEndpointMeasuresRTT(t *testing.T) {
 	if jitter < 0 {
 		t.Errorf("jitter must not be negative, got %v", jitter)
 	}
-	if ms := roundMS(best); ms != float64(int64(best/100)/10) {
+	if ms := roundMS(best); ms != float64((best+50*time.Microsecond)/(100*time.Microsecond))/10.0 {
 		t.Errorf("roundMS mismatch: %v", ms)
 	}
 }

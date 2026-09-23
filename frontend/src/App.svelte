@@ -1,7 +1,7 @@
 <svelte:window on:keydown={onKey} />
 
 <div class="app">
-  <TitleBar {state} {maximised} on:minimise={minimise} on:maximise={maximise} onClose={onClose} />
+  <TitleBar {state} {maximised} on:minimise={minimise} on:maximise={maximise} on:close={onClose} />
 
   <StatusHero
     {state}
@@ -59,7 +59,7 @@
   <StatusBar {state} on:logs={() => (sheet = 'logs')} on:config={() => { previewId = selected?.id || ''; sheet = 'config'; }} />
 
   {#if menu}
-    <ContextMenu {menu} on:act={onMenuAction} onClose={() => (menu = null)} />
+    <ContextMenu {menu} on:act={onMenuAction} on:close={() => (menu = null)} />
   {/if}
 
   {#if sheet === 'import'}
@@ -170,21 +170,29 @@
   async function toggleConnect() {
     if (connected) {
       busy = true;
-      const r = await guard(() => api.disconnect(), 'Disconnect');
-      if (r !== null) { push('ok', 'Disconnected', 'The system proxy was restored'); }
-      busy = false;
-      state = (await guard(() => api.getState())) || state;
-      nodes = (await api.listNodes()) || nodes;
+      try {
+        const r = await guard(() => api.disconnect(), 'Disconnect');
+        if (r !== null) { push('ok', 'Disconnected', 'The system proxy was restored'); }
+      } finally {
+        busy = false;
+        state = (await guard(() => api.getState())) || state;
+        nodes = (await api.listNodes()) || nodes;
+      }
       return;
     }
-    if (!selected) { push('warn', 'Pick a node first', 'Click a row, then connect.'); return; }
+    const targetNode = selected || nodes[0];
+    if (!targetNode) { push('warn', 'Pick a node first', 'Click a row, then connect.'); return; }
     busy = true;
-    const r = await guard(() => api.connect(selected.id), 'Connection failed');
-    busy = false;
-    if (r) {
-      state = r;
+    try {
+      const r = await guard(() => api.connect(targetNode.id), 'Connection failed');
+      if (r) {
+        state = r;
+        push('ok', 'Connected', `${targetNode.name} · socks 127.0.0.1:${r.settings?.socksPort}` + (r.proxy?.enabledByApp ? ' · system proxy on' : ''));
+      }
+    } finally {
+      busy = false;
       nodes = (await api.listNodes()) || nodes;
-      push('ok', 'Connected', `${selected.name} · socks 127.0.0.1:${r.settings?.socksPort}` + (r.proxy?.enabledByApp ? ' · system proxy on' : ''));
+      state = (await guard(() => api.getState())) || state;
     }
   }
 
@@ -192,9 +200,14 @@
     const id = e?.detail || e;
     if (!id) return;
     busy = true;
-    const r = await guard(() => api.connect(id), 'Connection failed');
-    busy = false;
-    if (r) { state = r; nodes = (await api.listNodes()) || nodes; }
+    try {
+      const r = await guard(() => api.connect(id), 'Connection failed');
+      if (r) { state = r; }
+    } finally {
+      busy = false;
+      nodes = (await api.listNodes()) || nodes;
+      state = (await guard(() => api.getState())) || state;
+    }
   }
 
   async function select(id) {

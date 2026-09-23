@@ -180,6 +180,9 @@ func OpenStore(path string) (*Store, error) {
 	if err := json.Unmarshal(raw, &disk); err == nil {
 		s.data.Settings = mergeSettings(disk.Settings, DefaultSettings())
 	}
+	if s.data.SelectedID == "" && len(s.data.Configs) > 0 {
+		s.data.SelectedID = s.data.Configs[0].ID
+	}
 	return s, nil
 }
 

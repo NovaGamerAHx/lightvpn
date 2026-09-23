@@ -19,7 +19,7 @@
       title={maximised ? 'Restore' : 'Maximise'} aria-label={maximised ? 'Restore window' : 'Maximise window'}>
       {@html maximised ? icons.restore : icons.max}
     </button>
-    <button class="wbtn close" on:click|preventDefault={() => dispatch('Close')} title="Hide to tray" aria-label="Close">
+    <button class="wbtn close" on:click|preventDefault={() => dispatch('close')} title="Hide to tray" aria-label="Close">
       {@html icons.x}
     </button>
   </div>

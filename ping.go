@@ -147,5 +147,5 @@ func roundMS(d time.Duration) float64 {
 	if d <= 0 {
 		return 0
 	}
-	return float64(int64(d/100) / 10.0) // 0.1 ms resolution
+	return float64((d+50*time.Microsecond)/(100*time.Microsecond)) / 10.0 // 0.1 ms resolution
 }
