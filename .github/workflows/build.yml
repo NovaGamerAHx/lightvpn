@@ -1,0 +1,79 @@
+name: Build Windows Application
+
+on:
+  push:
+    branches: [ "main", "master" ]
+    tags: [ "v*" ]
+  pull_request:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build Windows x64 Single Executable
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '>=1.22'
+          cache: true
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install Wails CLI
+        run: |
+          go install github.com/wailsapp/wails/v2/cmd/wails@v2.16.0
+
+      - name: Install Frontend Dependencies
+        run: |
+          cd frontend
+          npm ci
+
+      - name: Run Backend Tests
+        run: |
+          go test -v -count=1 ./...
+
+      - name: Build Windows Application
+        run: |
+          wails build -platform windows/amd64 -clean -ldflags="-s -w"
+
+      - name: Verify Executable
+        run: |
+          if (Test-Path "build/bin/LightVPN.exe") {
+            Write-Host "Build succeeded: build/bin/LightVPN.exe"
+            Get-Item "build/bin/LightVPN.exe" | Select-Object Name, Length, LastWriteTime
+          } else {
+            Write-Error "build/bin/LightVPN.exe was not found!"
+            exit 1
+          }
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: LightVPN-Windows-x64
+          path: build/bin/LightVPN.exe
+          if-no-files-found: error
+
+      - name: Create Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: build/bin/LightVPN.exe
+          generate_release_notes: true
