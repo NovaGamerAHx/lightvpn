@@ -1,0 +1,15 @@
+{
+	"fixed": {
+		"file_version": "1.0.0"
+	},
+	"info": {
+		"0000": {
+			"ProductVersion": "1.0.0",
+			"CompanyName": "LightVPN",
+			"FileDescription": "LightVPN",
+			"LegalCopyright": "Personal use — no warranty",
+			"ProductName": "LightVPN",
+			"Comments": "Lightweight single-file Xray client (VLESS/Trojan). Xray-core is embedded as a Go library; no xray.exe, no installer, no external dependencies."
+		}
+	}
+}
