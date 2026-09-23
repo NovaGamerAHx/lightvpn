@@ -1,0 +1,21 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "LightVPN",
+  "outputfilename": "LightVPN",
+  "frontend:install": "npm install",
+  "frontend:build": "npm run build",
+  "frontend:dev:watcher": "npm run dev",
+  "frontend:dev:serverUrl": "auto",
+  "author": {
+    "name": "LightVPN"
+  },
+  "info": {
+    "productName": "LightVPN",
+    "productVersion": "1.0.0",
+    "copyright": "Personal use — no warranty",
+    "comments": "Lightweight single-file Xray client (VLESS/Trojan). Xray-core is embedded as a Go library; no xray.exe, no installer, no external dependencies."
+  },
+  "obfuscated": false,
+  "skipbindings": false,
+  "windowsConsole": false
+}
