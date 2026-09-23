@@ -41,10 +41,11 @@ jobs:
         run: |
           go install github.com/wailsapp/wails/v2/cmd/wails@v2.16.0
 
-      - name: Install Frontend Dependencies
+      - name: Install Frontend Dependencies & Build Frontend
         run: |
           cd frontend
           npm ci
+          npm run build
 
       - name: Run Backend Tests
         run: |
