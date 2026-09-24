@@ -1,72 +1,64 @@
 package main
 
+// util.go — small, pure helper functions used across the app.
+// Kept separate so parser and xrayconfig do not bloat with repetitive logic.
+
 import (
-	"bytes"
-	"encoding/json"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
-	"runtime/debug"
+	"net"
 	"strings"
 	"time"
 )
 
-// marshalIndent produces stable, human readable JSON (the same bytes the UI
-// previews and the core receives).
-func marshalIndent(v any) ([]byte, error) {
-	var buf bytes.Buffer
-	enc := json.NewEncoder(&buf)
-	enc.SetEscapeHTML(false)
-	enc.SetIndent("", "  ")
-	if err := enc.Encode(v); err != nil {
-		return nil, err
-	}
-	return bytes.TrimRight(buf.Bytes(), "\n"), nil
+// generateID returns a random hex string suitable for link and log IDs.
+func generateID() string {
+	b := make([]byte, 8)
+	_, _ = rand.Read(b)
+	return hex.EncodeToString(b)
 }
 
-func prettyJSON(raw []byte) string {
-	var v any
-	if err := json.Unmarshal(raw, &v); err != nil {
-		return string(raw)
+// clamp keeps an integer within [min, max].
+func clamp(val, min, max int) int {
+	if val < min {
+		return min
 	}
-	b, err := json.MarshalIndent(v, "", "  ")
-	if err != nil {
-		return string(raw)
+	if val > max {
+		return max
 	}
-	return string(b)
+	return val
 }
 
-// xrayVersion reads the version of the vendored xray-core module straight out
-// of the binary's build info, so the UI can show what core it embeds.
-func xrayVersion() string {
-	bi, ok := debug.ReadBuildInfo()
-	if !ok {
-		return "unknown"
+// clip trims a string if it exceeds max runes, appending an ellipsis.
+func clip(s string, max int) string {
+	if max <= 0 {
+		return ""
 	}
-	for _, d := range bi.Deps {
-		if d.Path == "github.com/xtls/xray-core" {
-			v := strings.TrimPrefix(d.Version, "v")
-			if i := strings.Index(v, "-"); i > 0 {
-				v = v[:i]
-			}
-			return v
-		}
+	r := []rune(s)
+	if len(r) <= max {
+		return s
 	}
-	return "unknown"
+	return string(r[:max-1]) + "…"
 }
 
-func firstNonEmpty(values ...string) string {
-	for _, v := range values {
-		if strings.TrimSpace(v) != "" {
-			return v
-		}
+// formatBytes formats byte counts in human readable units (B, KB, MB, GB).
+func formatBytes(b int64) string {
+	const unit = 1024
+	if b < unit {
+		return fmt.Sprintf("%d B", b)
 	}
-	return ""
+	div, exp := int64(unit), 0
+	for n := b / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %cB", float64(b)/float64(div), "KMGTPE"[exp])
 }
 
-func clampMS(d time.Duration) float64 {
-	if d < 0 {
-		return 0
-	}
-	return float64(d.Microseconds()) / 1000.0
+// nowMillis returns the current unix timestamp in milliseconds.
+func nowMillis() int64 {
+	return time.Now().UnixNano() / int64(time.Millisecond)
 }
 
 // friendlyDialError turns Go's raw dial errors into something a user can act on.
@@ -79,7 +71,7 @@ func friendlyDialError(err error) string {
 	switch {
 	case strings.Contains(low, "no such host"):
 		return "DNS lookup failed for the server address"
-	case strings.Contains(low, "connection refused"):
+	case strings.Contains(low, "connection refused"), strings.Contains(low, "refused"):
 		return "port closed — the server refused the connection"
 	case strings.Contains(low, "i/o timeout"), strings.Contains(low, "timeout"):
 		return "timed out (unreachable or blocked port)"
