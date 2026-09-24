@@ -1,9 +1,14 @@
 <div class="hero">
   <div style="min-width:0">
-    <span class="state-pill" class:on={connected} class:busy={busy || connecting} class:off={!connected}>
-      <span class="led" />
-      {connected ? 'Protected' : busy || connecting ? (connecting ? 'Connecting…' : 'Working…') : 'Not connected'}
-    </span>
+    <div style="display:flex;align-items:center;gap:8px">
+      <span class="state-pill" class:on={connected} class:busy={busy || connecting} class:off={!connected}>
+        <span class="led" />
+        {connected ? 'Connected · Protected' : busy || connecting ? (connecting ? 'Connecting…' : 'Processing…') : 'Not connected'}
+      </span>
+      {#if connected && node?.pingMs > 0}
+        <span class="ping-badge" title="Last measured TCP latency">{node.pingMs.toFixed(0)} ms</span>
+      {/if}
+    </div>
 
     <h1 title={title}>{title}</h1>
 
@@ -20,7 +25,7 @@
       <span>HTTP <b class="mono">127.0.0.1:{ports.http}</b></span>
       {#if state?.proxy?.enabledByApp}
         <span class="sep" />
-        <span style="color:#9ff0c4">system proxy on</span>
+        <span class="proxy-tag">system proxy on</span>
       {/if}
     </div>
 
@@ -41,9 +46,17 @@
   >
     <svg class="ring" viewBox="0 0 24 24" aria-hidden="true">
       <circle cx="12" cy="12" r="9.2" />
-      {#if busy}<path class="spin" d="M12 2.8a9.2 9.2 0 019.2 9.2" />{:else}<path d="M12 6.6v5.6" />{/if}
+      {#if busy || connecting}
+        <path class="spin" d="M12 2.8a9.2 9.2 0 019.2 9.2" />
+      {:else if connected}
+        <rect x="9" y="9" width="6" height="6" rx="1.5" fill="#fff" />
+      {:else}
+        <path d="M10 8l6 4-6 4V8z" fill="#fff" />
+      {/if}
     </svg>
-    {connected ? 'Disconnect' : busy ? 'Working…' : 'Connect'}
+    <span class="btn-text">
+      {connected ? (busy ? 'Disconnecting…' : 'Disconnect') : (busy || connecting ? 'Connecting…' : 'Connect')}
+    </span>
     {#if connected && elapsed > 0}<span class="uptime">{fmtUptime(elapsed)}</span>{/if}
   </button>
 </div>
@@ -65,7 +78,7 @@
     ? state?.current?.name || 'Connected'
     : selected
       ? selected.name
-      : 'Nothing imported yet';
+      : 'Select or import a node';
   $: ports = {
     socks: state?.settings?.socksPort || 10808,
     http: state?.settings?.httpPort || 10809,

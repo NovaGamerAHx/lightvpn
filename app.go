@@ -520,6 +520,7 @@ func (a *App) Connect(id string) (StateView, error) {
 	// pinned instead. Do it now (once) so the generated config is accepted.
 	l, err = a.ensureCertPin(l, data.Settings)
 	if err != nil {
+		a.setConnecting(false)
 		a.setError(err.Error())
 		a.emitState()
 		return a.State(), err
@@ -527,6 +528,7 @@ func (a *App) Connect(id string) (StateView, error) {
 
 	a.log("info", fmt.Sprintf("connecting to %s …", l.Name))
 	if err := a.mgr.Start(l); err != nil {
+		a.setConnecting(false)
 		a.setError(err.Error())
 		a.emitState()
 		return a.State(), err
@@ -545,6 +547,7 @@ func (a *App) Connect(id string) (StateView, error) {
 	a.clearError()
 	a.log("info", "connected")
 	a.trayState(true, l.Name)
+	a.setConnecting(false)
 	a.emitState()
 	a.emit("nodes", a.ListNodes())
 	return a.State(), nil
@@ -630,7 +633,8 @@ func (a *App) Disconnect() error {
 // Toggle is what the big button calls.
 func (a *App) Toggle(id string) (StateView, error) {
 	if a.mgr.IsRunning() {
-		return a.State(), a.Disconnect()
+		err := a.Disconnect()
+		return a.State(), err
 	}
 	return a.Connect(id)
 }

@@ -210,6 +210,15 @@ func (m *Manager) Status() CoreStatus {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	s := m.status
+	running := m.inst != nil && m.inst.IsRunning()
+	s.Running = running
+	if !running {
+		s.StartedAt = 0
+		s.UptimeMS = 0
+		s.NodeID = ""
+		s.NodeName = ""
+		s.Endpoint = ""
+	}
 	s.SocksPort = m.opts.SocksPort
 	s.HTTPPort = m.opts.HTTPPort
 	if s.Running && s.StartedAt > 0 {
@@ -233,6 +242,11 @@ func (m *Manager) fail(l *Link, err error) {
 	m.mu.Lock()
 	m.status.Running = false
 	m.status.Starting = false
+	m.status.NodeID = ""
+	m.status.NodeName = ""
+	m.status.Endpoint = ""
+	m.status.StartedAt = 0
+	m.status.UptimeMS = 0
 	m.status.LastError = msg
 	m.mu.Unlock()
 	m.log("error", "could not connect to "+l.Name+": "+msg)

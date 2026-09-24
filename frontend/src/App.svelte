@@ -1,4 +1,4 @@
-<svelte:window on:keydown={onKey} />
+<svelte:window on:keydown={onKey} on:resize={onWindowResize} />
 
 <div class="app">
   <TitleBar {state} {maximised} on:minimise={minimise} on:maximise={maximise} on:close={onClose} />
@@ -17,6 +17,21 @@
       {#if pingRunning}· pinging…{:else if lastPingAt}· pinged {new Date(lastPingAt).toLocaleTimeString()}{/if}
     </span>
 
+    {#if nodes.length > 1}
+      <div class="search-box">
+        <input
+          class="search-input"
+          type="text"
+          placeholder="Filter nodes…"
+          bind:value={search}
+          spellcheck="false"
+        />
+        {#if search}
+          <button class="clear-search" on:click={() => (search = '')} title="Clear filter">×</button>
+        {/if}
+      </div>
+    {/if}
+
     <button class="btn" on:click={pingAll} disabled={pingRunning || nodes.length === 0} title="Measure TCP latency to every server">
       {@html icons.ping} {pingRunning ? 'Testing…' : 'Test ping'}
     </button>
@@ -33,12 +48,21 @@
       <div class="empty">
         {@html icons.shield}
         <h2>No nodes yet</h2>
-        <p>Paste one or many <code>vless://</code> / <code>trojan://</code> share links — V2RayN export format, one per line. Nothing leaves this machine except through the tunnel you start.</p>
+        <p>Paste one or many <code>vless://</code> or <code>trojan://</code> share links or a Base64 subscription list. Traffic flows only through the tunnel you start.</p>
         <button class="btn primary" on:click={() => (sheet = 'import')}>{@html icons.plus} Import links</button>
       </div>
+    {:else if filteredNodes.length === 0}
+      <div class="empty">
+        {@html icons.eye}
+        <h2>No matching nodes</h2>
+        <p>No nodes match “{search}”. Clear the filter to show all {nodes.length} nodes.</p>
+        <button class="btn" on:click={() => (search = '')}>Clear filter</button>
+      </div>
     {:else}
-      <div class="group">Nodes · click a row to select, right-click for actions</div>
-      {#each nodes as n (n.id)}
+      <div class="group">
+        Nodes ({filteredNodes.length}) · click to select, double-click to connect, right-click for options
+      </div>
+      {#each filteredNodes as n (n.id)}
         <NodeRow
           node={n}
           pingRunning={pingRunning}
@@ -50,13 +74,18 @@
           on:rename={(e) => rename(e.detail)}
           on:delete={(e) => remove(e.detail)}
           on:preview={(e) => { previewId = e.detail; sheet = 'config'; }}
-          on:menu={(e) => (menu = e.detail)}
+          on:menu={(e) => onRowMenu(e.detail)}
         />
       {/each}
     {/if}
   </div>
 
-  <StatusBar {state} on:logs={() => (sheet = 'logs')} on:config={() => { previewId = selected?.id || ''; sheet = 'config'; }} />
+  <StatusBar
+    {state}
+    {elapsed}
+    on:logs={() => (sheet = 'logs')}
+    on:config={() => { previewId = selected?.id || ''; sheet = 'config'; }}
+  />
 
   {#if menu}
     <ContextMenu {menu} on:act={onMenuAction} on:close={() => (menu = null)} />
@@ -82,8 +111,8 @@
 </div>
 
 <script>
-  import { onMount, onDestroy, createEventDispatcher } from 'svelte';
-  import { api, on, isMock } from './lib/bridge.js';
+  import { onMount, onDestroy } from 'svelte';
+  import { api, on } from './lib/bridge.js';
   import { icons } from './lib/icons.js';
   import { copyText } from './lib/utils.js';
   import TitleBar from './components/TitleBar.svelte';
@@ -97,8 +126,6 @@
   import StatusBar from './components/StatusBar.svelte';
   import Toasts from './components/Toasts.svelte';
 
-  const dispatch = createEventDispatcher();
-
   let state = null;
   let nodes = [];
   let sheet = null;
@@ -110,42 +137,107 @@
   let toasts = [];
   let elapsed = 0;
   let maximised = false;
+  let search = '';
   let tick;
   const offs = [];
 
-  $: selected = nodes.find((n) => n.selected) || null;
+  $: selected = nodes.find((n) => n.selected) || (nodes.length > 0 ? nodes[0] : null);
   $: connected = !!state?.connected;
 
-  onMount(async () => {
+  $: filteredNodes = search.trim()
+    ? nodes.filter((n) => {
+        const q = search.toLowerCase();
+        return (
+          (n.name || '').toLowerCase().includes(q) ||
+          (n.endpoint || '').toLowerCase().includes(q) ||
+          (n.address || '').toLowerCase().includes(q) ||
+          (n.protocol || '').toLowerCase().includes(q) ||
+          (n.transport || '').toLowerCase().includes(q)
+        );
+      })
+    : nodes;
+
+  async function syncState() {
     try {
-      state = await api.getState();
-      nodes = (await api.listNodes()) || [];
-    } catch (e) {
-      push('err', 'Backend unavailable', String(e?.message || e));
-    }
+      const [s, n] = await Promise.all([
+        api.getState(),
+        api.listNodes(),
+      ]);
+      if (s) state = s;
+      if (n) nodes = n;
+    } catch (_) {}
+  }
+
+  onMount(async () => {
+    await syncState();
+
     offs.push(
-      on('state', (s) => { state = s; busy = false; }),
-      on('nodes', (list) => { nodes = list || []; }),
+      on('state', (s) => {
+        if (s) {
+          state = s;
+          busy = false;
+        }
+      }),
+      on('nodes', (list) => {
+        if (list) nodes = list;
+      }),
       on('ping', (r) => applyPing(r)),
-      on('ping:done', () => { pingRunning = false; lastPingAt = Date.now(); }),
-      on('log', (l) => { if (l?.level === 'error') push('err', 'Core', l.text); }),
+      on('ping:done', () => {
+        pingRunning = false;
+        lastPingAt = Date.now();
+      }),
+      on('log', (l) => {
+        if (l?.level === 'error') push('err', 'Core Error', l.text);
+      }),
     );
+
+    // Sync state whenever the window regains focus
+    const onFocus = () => {
+      if (!busy) syncState();
+    };
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onFocus);
+    offs.push(() => {
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onFocus);
+    });
+
+    // Uptime tick & periodic background sync every ~2 seconds
+    let pollCount = 0;
     tick = setInterval(() => {
-      if (state?.connected && state?.startedAt) elapsed = Date.now() - state.startedAt;
-      else elapsed = 0;
+      if (state?.connected && state?.startedAt) {
+        elapsed = Date.now() - state.startedAt;
+      } else if (elapsed !== 0) {
+        elapsed = 0;
+      }
+
+      pollCount++;
+      if (pollCount % 8 === 0 && !busy && !pingRunning) {
+        syncState();
+      }
     }, 250);
-    maximised = window.innerWidth >= 1600;
+
+    onWindowResize();
   });
 
   onDestroy(() => {
     clearInterval(tick);
-    offs.forEach((f) => { try { f?.(); } catch (_) {} });
+    offs.forEach((f) => {
+      try { f?.(); } catch (_) {}
+    });
   });
+
+  function onWindowResize() {
+    maximised = window.innerWidth >= (screen?.availWidth || 1920) - 20 &&
+                window.innerHeight >= (screen?.availHeight || 1080) - 20;
+  }
 
   function applyPing(r) {
     if (!r) return;
     nodes = nodes.map((n) =>
-      n.id === r.id ? { ...n, pingMs: r.ok ? r.ms : 0, pingError: r.error || '', pingAt: r.at || Date.now(), pinging: false } : n,
+      n.id === r.id
+        ? { ...n, pingMs: r.ok ? r.ms : 0, pingError: r.error || '', pingAt: r.at || Date.now(), pinging: false }
+        : n,
     );
   }
 
@@ -154,6 +246,7 @@
     toasts = [...toasts, { id, kind, msg, detail }];
     setTimeout(() => dismissToast({ detail: id }), kind === 'err' ? 6500 : 3200);
   }
+
   function dismissToast(e) {
     toasts = toasts.filter((t) => t.id !== (e?.detail ?? e));
   }
@@ -168,69 +261,92 @@
   }
 
   async function toggleConnect() {
-    if (connected) {
-      busy = true;
-      try {
-        const r = await guard(() => api.disconnect(), 'Disconnect');
-        if (r !== null) { push('ok', 'Disconnected', 'The system proxy was restored'); }
-      } finally {
-        busy = false;
-        state = (await guard(() => api.getState())) || state;
-        nodes = (await api.listNodes()) || nodes;
-      }
+    if (busy) return;
+    const targetNode = selected || nodes[0];
+    const targetId = targetNode?.id || '';
+    if (!connected && !targetId) {
+      push('warn', 'Pick a node first', 'Import or select a node, then connect.');
       return;
     }
-    const targetNode = selected || nodes[0];
-    if (!targetNode) { push('warn', 'Pick a node first', 'Click a row, then connect.'); return; }
+
     busy = true;
     try {
-      const r = await guard(() => api.connect(targetNode.id), 'Connection failed');
+      const r = await guard(() => api.toggle(targetId), connected ? 'Disconnect failed' : 'Connection failed');
       if (r) {
         state = r;
-        push('ok', 'Connected', `${targetNode.name} · socks 127.0.0.1:${r.settings?.socksPort}` + (r.proxy?.enabledByApp ? ' · system proxy on' : ''));
+        if (r.connected) {
+          const activeNode = nodes.find((n) => n.id === (r.current?.id || targetId)) || targetNode;
+          push(
+            'ok',
+            'Connected',
+            `${activeNode?.name || 'Node'} · socks 127.0.0.1:${r.settings?.socksPort}` +
+              (r.proxy?.enabledByApp ? ' · system proxy on' : ''),
+          );
+        } else {
+          push('ok', 'Disconnected', 'The system proxy was restored');
+        }
       }
     } finally {
       busy = false;
-      nodes = (await api.listNodes()) || nodes;
-      state = (await guard(() => api.getState())) || state;
+      await syncState();
     }
   }
 
   async function connect(e) {
     const id = e?.detail || e;
-    if (!id) return;
+    if (!id || busy) return;
     busy = true;
     try {
       const r = await guard(() => api.connect(id), 'Connection failed');
-      if (r) { state = r; }
+      if (r) {
+        state = r;
+        if (r.connected) {
+          const target = nodes.find((n) => n.id === id);
+          push(
+            'ok',
+            'Connected',
+            `${target?.name || 'Node'} · socks 127.0.0.1:${r.settings?.socksPort}` +
+              (r.proxy?.enabledByApp ? ' · system proxy on' : ''),
+          );
+        }
+      }
     } finally {
       busy = false;
-      nodes = (await api.listNodes()) || nodes;
-      state = (await guard(() => api.getState())) || state;
+      await syncState();
     }
   }
 
   async function select(id) {
+    if (!id) return;
     nodes = nodes.map((n) => ({ ...n, selected: n.id === id }));
     await guard(() => api.selectNode(id), 'Select');
     state = (await guard(() => api.getState())) || state;
   }
 
   async function pingAll() {
-    if (nodes.length === 0) return;
+    if (nodes.length === 0 || pingRunning) return;
     pingRunning = true;
     nodes = nodes.map((n) => ({ ...n, pinging: true }));
-    const r = await guard(() => api.pingAll(), 'Ping');
-    if (r) nodes = (await api.listNodes()) || nodes;
-    setTimeout(() => { pingRunning = false; lastPingAt = Date.now(); nodes = nodes.map((n) => ({ ...n, pinging: false })); }, 120);
+    try {
+      const r = await guard(() => api.pingAll(), 'Ping');
+      if (r) nodes = (await api.listNodes()) || nodes;
+    } finally {
+      pingRunning = false;
+      lastPingAt = Date.now();
+      nodes = nodes.map((n) => ({ ...n, pinging: false }));
+    }
   }
 
   async function pingOne(e) {
     const id = e?.detail || e;
+    if (!id) return;
     nodes = nodes.map((n) => (n.id === id ? { ...n, pinging: true } : n));
-    const r = await guard(() => api.pingNode(id), 'Ping');
-    if (r) applyPing({ ...r, pinging: false });
-    nodes = nodes.map((n) => (n.id === r?.id ? { ...n, pinging: false } : n));
+    try {
+      const r = await guard(() => api.pingNode(id), 'Ping');
+      if (r) applyPing({ ...r, pinging: false });
+    } finally {
+      nodes = nodes.map((n) => (n.id === id ? { ...n, pinging: false } : n));
+    }
   }
 
   async function copyLink(e) {
@@ -247,39 +363,55 @@
     if (!node) return;
     if (node.connected && !window.confirm(`${node.name} is the active node.\nDisconnect and delete it?`)) return;
     await guard(() => api.deleteNode(id), 'Delete');
-    nodes = (await api.listNodes()) || nodes.filter((n) => n.id !== id);
     push('ok', 'Deleted', node.name);
+    await syncState();
   }
 
   async function rename(e) {
-    const node = nodes.find((n) => n.id === (e?.detail?.id ?? e?.detail) ) || selected;
+    const node = nodes.find((n) => n.id === (e?.detail?.id ?? e?.detail)) || selected;
     if (!node) return;
     const name = window.prompt('Rename node', node.name);
     if (name == null) return;
     const trimmed = name.trim();
     if (!trimmed) return;
     await guard(() => api.renameNode(node.id, trimmed), 'Rename');
-    nodes = (await api.listNodes()) || nodes;
+    await syncState();
   }
 
   async function doImport(e) {
     const blob = e?.detail?.text ?? e?.detail ?? '';
     const res = await guard(() => api.importLinks(String(blob)), 'Import');
     if (!res) return;
-    nodes = (await api.listNodes()) || nodes;
-    state = (await guard(() => api.getState())) || state;
+    await syncState();
     if (res.added?.length) {
-      push('ok', res.message || `Imported ${res.added.length} node(s)`, res.errors?.length ? `${res.errors.length} line(s) rejected` : '');
+      push(
+        'ok',
+        res.message || `Imported ${res.added.length} node(s)`,
+        res.errors?.length ? `${res.errors.length} line(s) rejected` : '',
+      );
       sheet = null;
     } else {
-      push('warn', res.message || 'Nothing imported', '');
+      push('warn', res.message || 'Nothing imported', res.errors?.[0]?.error || '');
     }
     return res;
   }
 
   async function saveSettings(e) {
     const r = await guard(() => api.updateSettings(e.detail), 'Settings');
-    if (r) { state = r; push('ok', 'Settings saved'); sheet = null; }
+    if (r) {
+      state = r;
+      push('ok', 'Settings saved');
+      sheet = null;
+      await syncState();
+    }
+  }
+
+  function onRowMenu(detail) {
+    if (menu && menu.id === detail.id && detail.isButton) {
+      menu = null;
+    } else {
+      menu = detail;
+    }
   }
 
   function onMenuAction(e) {
@@ -301,10 +433,32 @@
   function minimise() { api.win.minimise(); }
   function maximise() { maximised = !maximised; api.win.maximise(); }
   function onClose() { api.win.close(); }
+
   function onKey(ev) {
-    if (ev.key === 'Escape') { menu = null; sheet = null; return; }
-    if (ev.key === 'Enter' && (ev.ctrlKey || ev.metaKey) && sheet !== 'import') { toggleConnect(); return; }
-    if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'i') { ev.preventDefault(); sheet = 'import'; }
-    if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 't') { ev.preventDefault(); pingAll(); }
+    if (ev.key === 'Escape') {
+      if (menu) { menu = null; return; }
+      if (sheet) { sheet = null; return; }
+      if (search) { search = ''; return; }
+    }
+    if (ev.key === 'Enter' && (ev.ctrlKey || ev.metaKey) && sheet !== 'import') {
+      ev.preventDefault();
+      toggleConnect();
+      return;
+    }
+    if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'i' && !sheet) {
+      ev.preventDefault();
+      sheet = 'import';
+      return;
+    }
+    if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 't' && !sheet) {
+      ev.preventDefault();
+      pingAll();
+      return;
+    }
+    if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'f' && !sheet) {
+      ev.preventDefault();
+      const el = document.querySelector('.search-input');
+      if (el) el.focus();
+    }
   }
 </script>

@@ -14,6 +14,7 @@ package main
 
 import (
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -215,6 +216,21 @@ func (e ParseError) Error() string { return fmt.Sprintf("line %d: %s", e.Line, e
 // comment lines are ignored, which makes pasting a whole subscription file work.
 // Duplicates (same connection parameters) are reported instead of re-added.
 func ParseShareLinks(blob string) (links []*Link, perrs []ParseError) {
+	trimmed := strings.TrimSpace(blob)
+	if !strings.Contains(trimmed, "://") && len(trimmed) > 16 {
+		clean := strings.ReplaceAll(strings.ReplaceAll(trimmed, "\r", ""), "\n", "")
+		clean = strings.TrimSpace(clean)
+		if dec, err := base64.StdEncoding.DecodeString(clean); err == nil && strings.Contains(string(dec), "://") {
+			blob = string(dec)
+		} else if dec, err := base64.RawStdEncoding.DecodeString(clean); err == nil && strings.Contains(string(dec), "://") {
+			blob = string(dec)
+		} else if dec, err := base64.URLEncoding.DecodeString(clean); err == nil && strings.Contains(string(dec), "://") {
+			blob = string(dec)
+		} else if dec, err := base64.RawURLEncoding.DecodeString(clean); err == nil && strings.Contains(string(dec), "://") {
+			blob = string(dec)
+		}
+	}
+
 	seen := map[string]string{}
 	for i, line := range strings.Split(strings.ReplaceAll(blob, "\r\n", "\n"), "\n") {
 		line = strings.TrimSpace(strings.Trim(strings.TrimSpace(line), "\"'"))

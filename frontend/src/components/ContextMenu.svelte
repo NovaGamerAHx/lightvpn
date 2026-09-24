@@ -1,4 +1,6 @@
-<svelte:window on:click={close} on:contextmenu={close} on:keydown={onKey} on:resize={close} on:scroll={close} capture="true" />
+<svelte:window on:keydown={onKey} on:resize={close} />
+
+<div class="menu-scrim" on:click|preventDefault|stopPropagation={close} on:contextmenu|preventDefault|stopPropagation={close} />
 
 <div class="menu" style="left:{x}px;top:{y}px" role="menu" on:click|stopPropagation on:contextmenu|preventDefault|stopPropagation>
   <div class="head">{clip(menu.name)}</div>
@@ -14,7 +16,7 @@
 </div>
 
 <script>
-  import { createEventDispatcher, tick } from 'svelte';
+  import { createEventDispatcher } from 'svelte';
   import { icons } from '../lib/icons.js';
 
   export let menu;
@@ -54,6 +56,7 @@
 
   function act(action) {
     dispatch('act', { action, id: menu.id });
+    dispatch('close');
   }
   function close() { dispatch('close'); }
   function onKey(e) { if (e.key === 'Escape') close(); }

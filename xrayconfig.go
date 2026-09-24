@@ -369,7 +369,7 @@ func buildRealitySettings(l *Link) (map[string]any, error) {
 	}
 	fp := strings.ToLower(orDefault(l.Fingerprint, "chrome"))
 	switch fp {
-	case "chrome", "firefox", "safari", "edge", "ios", "android", "qq", "360", "random", " randomized", "tlsauto":
+	case "chrome", "firefox", "safari", "edge", "ios", "android", "qq", "360", "random", "randomized", "tlsauto":
 	default:
 		return nil, fmt.Errorf("unknown fp (fingerprint) %q — use chrome, firefox, safari, edge, ios, android, qq, 360 or random", l.Fingerprint)
 	}

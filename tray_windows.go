@@ -139,11 +139,7 @@ func (t *tray) showWindow() {
 }
 
 func (t *tray) toggleConnection() {
-	if t.app.mgr.IsRunning() {
-		_ = t.app.Disconnect()
-		return
-	}
-	_, _ = t.app.Connect("")
+	_, _ = t.app.Toggle("")
 }
 
 func (t *tray) stop() {

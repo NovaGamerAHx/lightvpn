@@ -1,11 +1,15 @@
+<svelte:window on:keydown={onKey} />
+
 <div class="scrim" on:click|self={() => dispatch('close')} role="dialog" aria-modal="true" aria-label="Generated config">
   <div class="sheet">
     <header>
       <h3>Generated Xray config</h3>
       <span class="sub">{title || ''}</span>
       <span style="flex:1" />
-      <button class="btn ghost sm" on:click={load} title="Regenerate">{@html icons.refresh}</button>
-      <button class="btn ghost sm" on:click={copy} title="Copy JSON">{@html icons.copy} Copy</button>
+      <button class="btn ghost sm" on:click={load} title="Regenerate">{@html icons.refresh} Refresh</button>
+      <button class="btn ghost sm" on:click={copy} title="Copy JSON">
+        {@html icons.copy} {copied ? 'Copied!' : 'Copy'}
+      </button>
       <button class="iconbtn" on:click={() => dispatch('close')} aria-label="Close">{@html icons.x}</button>
     </header>
     <div class="body">
@@ -56,10 +60,6 @@
   import { icons } from '../lib/icons.js';
   import { copyText } from '../lib/utils.js';
 
-  async function unpin() {
-    try { await api.clearPin(id); dispatch('unpinned'); await load(); } catch (e) { error = String(e?.message || e); }
-  }
-
   export let id = '';
   export let title = '';
   export let node = null;
@@ -67,10 +67,23 @@
 
   let json = '';
   let error = '';
+  let copied = false;
+  let lastLoadedId = null;
+
+  async function unpin() {
+    try {
+      await api.clearPin(id);
+      dispatch('unpinned');
+      await load();
+    } catch (e) {
+      error = String(e?.message || e);
+    }
+  }
 
   async function load() {
     error = '';
     try {
+      lastLoadedId = id;
       const raw = await api.preview(id);
       json = typeof raw === 'string' ? pretty(raw) : JSON.stringify(raw, null, 2);
     } catch (e) {
@@ -83,8 +96,21 @@
     try { return JSON.stringify(JSON.parse(raw), null, 2); } catch (_) { return raw; }
   }
 
-  async function copy() { await copyText(json || ''); }
+  async function copy() {
+    const ok = await copyText(json || '');
+    if (ok) {
+      copied = true;
+      setTimeout(() => (copied = false), 2000);
+    }
+  }
+
+  function onKey(e) {
+    if (e.key === 'Escape') dispatch('close');
+  }
 
   onMount(load);
-  $: if (id) load();
+
+  $: if (id && id !== lastLoadedId) {
+    load();
+  }
 </script>

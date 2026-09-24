@@ -7,7 +7,7 @@
 // toolchain. The mock is announced in the UI header so it can never be mistaken
 // for a live connection.
 
-const mock = import.meta.env.VITE_LIGHTVPN_MOCK === '1' || (typeof window !== 'undefined' && !window.go);
+const mock = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_LIGHTVPN_MOCK === '1') || (typeof window !== 'undefined' && !window.go);
 
 const listeners = new Map();
 const state = {
@@ -89,17 +89,27 @@ if (mock && typeof window !== 'undefined') {
         GetState: async () => snapshot(),
         ListNodes: async () => state.nodes.map(view),
         ImportLinks: async (blob) => {
-          const lines = String(blob || '').split('\n').map((l) => l.trim()).filter(Boolean);
+          let text = String(blob || '').trim();
+          if (!text.includes('://') && text.length > 16) {
+            try {
+              const cleaned = text.replace(/[\r\n\s]/g, '');
+              const decoded = atob(cleaned);
+              if (decoded.includes('://')) {
+                text = decoded;
+              }
+            } catch (_) {}
+          }
+          const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
           const added = [];
           const errors = [];
           lines.forEach((l, i) => {
-            const m = /^(vless|trojan):\/\/([^@]+)@([^:?]+):(\d+)([^#]*)#?(.*)$/.exec(l);
+            const m = /^(vless|trojan):\/\/([^@]+)@([^:?]+):(\d+)([^#]*)#?(.*)$/i.exec(l);
             if (!m) { errors.push({ line: i + 1, text: l.slice(0, 40), error: 'not a vless:// or trojan:// link' }); return; }
             const params = new URLSearchParams((m[5] || '').replace(/;/g, '&'));
             const net = params.get('type') || params.get('network') || 'tcp';
             const sec = params.get('security') || 'none';
             const node = {
-              id: nid(), name: decodeURIComponent(m[6] || '') || `${m[3]}:${m[4]}`, protocol: m[1],
+              id: nid(), name: decodeURIComponent(m[6] || '') || `${m[3]}:${m[4]}`, protocol: m[1].toLowerCase(),
               address: m[3], port: +m[4], endpoint: `${m[3]}:${m[4]}`,
               transport: `${net.toUpperCase()} · ${sec.toUpperCase()}`, network: net, security: sec,
               sni: params.get('sni') || '', host: params.get('host') || '', path: params.get('path') || '',
@@ -158,19 +168,34 @@ if (mock && typeof window !== 'undefined') {
           return out;
         },
         CancelPing: async () => null,
-        Connect: async () => {
-          state.connected = true; state.startedAt = now();
+        Connect: async (id) => {
+          state.connected = true;
+          state.startedAt = now();
+          if (id) {
+            state.nodes.forEach((n) => { n.selected = n.id === id; });
+          } else if (!state.nodes.some((n) => n.selected) && state.nodes.length > 0) {
+            state.nodes[0].selected = true;
+          }
           state.proxy = { ...state.proxy, enabledByApp: true, proxyEnable: true, proxyServer: `127.0.0.1:${state.settings.httpPort}` };
-          emit('state', snapshot()); emit('nodes', state.nodes.map(view));
+          emit('state', snapshot());
+          emit('nodes', state.nodes.map(view));
           return snapshot();
         },
         Disconnect: async () => {
-          state.connected = false; state.startedAt = 0;
+          state.connected = false;
+          state.startedAt = 0;
           state.proxy = { ...state.proxy, enabledByApp: false, proxyEnable: false, proxyServer: '' };
-          emit('state', snapshot()); emit('nodes', state.nodes.map(view));
+          emit('state', snapshot());
+          emit('nodes', state.nodes.map(view));
           return null;
         },
-        Toggle: async () => (state.connected ? (await window.go.main.App.Disconnect(), snapshot()) : await window.go.main.App.Connect('')),
+        Toggle: async (id) => {
+          if (state.connected) {
+            await window.go.main.App.Disconnect();
+            return snapshot();
+          }
+          return await window.go.main.App.Connect(id || '');
+        },
         SetSystemProxy: async (on) => { state.proxy = { ...state.proxy, proxyEnable: on }; return snapshot(); },
         ProxyStatus: async () => state.proxy,
         UpdateSettings: async (s) => { state.settings = { ...state.settings, ...s }; return snapshot(); },
@@ -229,6 +254,7 @@ export const api = {
   cancelPing: () => call('CancelPing'),
   connect: (id) => call('Connect', id || ''),
   disconnect: () => call('Disconnect'),
+  toggle: (id) => call('Toggle', id || ''),
   setSystemProxy: (on_) => call('SetSystemProxy', on_),
   updateSettings: (s) => call('UpdateSettings', s),
   getLogs: (n) => call('GetLogs', n || 200),
