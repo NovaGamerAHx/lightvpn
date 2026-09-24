@@ -69,6 +69,9 @@ func PingEndpoint(ctx context.Context, addr string, timeout time.Duration, sampl
 			break // a dead server does not need three more attempts
 		}
 		_ = conn.Close()
+		if elapsed <= 0 {
+			elapsed = time.Microsecond
+		}
 		times = append(times, elapsed)
 		if best == 0 || elapsed < best {
 			best = elapsed
